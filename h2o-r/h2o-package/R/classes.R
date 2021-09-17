@@ -127,13 +127,10 @@ setMethod("h2o.keyof", signature(object = "Keyed"), function(object) {
 #' @slot algorithm string denoting the algorithm used to build infogram
 #' @slot admissible_features string array denoting all predictor names which pass the cmi and relelvance threshold
 #' @slot admissible_score is H2OFrame that contains columns, admissible, admissible_index, relevance, cmi, cmi_raw
-#' @slot admissible_score_valid is H2OFrame that contains same result as admissible_score but derived from validation dataset
-#' @slot admissible_score_xval is H2OFrame that contains same result as admissible_score but derived from xval hold-out
 #' @aliases H2OInfogramModel
 #' @export
 setClass("H2OInfogramModel", slots = list(model_id='character', algorithm='character', admissible_features='character',
-                                          admissible_score = "H2OFrame", admissible_score_valid = "H2OFrame", 
-                                          admissible_score_xval = "H2OFrame"))
+                                          admissible_score = "H2OFrame"))
 
 #' @rdname initialize
 #' @param .object A \code{H2OInfogramModel} object
@@ -148,6 +145,7 @@ setMethod("initialize", "H2OInfogramModel", function(.Object, model_id, ...) {
         (infogram_model@algorithm == 'infogram')) {
       .Object@model_id <- infogram_model@model_id
       .Object@algorithm <- infogram_model@algorithm
+      if (!is.null(infogram_model@model$admissible_features) && !is.list(infogram_model@model$admissible_features))
       .Object@admissible_features <-
         infogram_model@model$admissible_features
       .Object@admissible_score <- h2o.getFrame(infogram_model@model$relevance_cmi_key)
