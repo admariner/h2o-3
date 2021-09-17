@@ -29,7 +29,7 @@ public class InfogramModelV3 extends ModelSchemaV3<InfogramModel, InfogramModelV
 
     @API(help="Array containing names of admissible features for the user from cross-validation",
             direction = API.Direction.OUTPUT)
-    public String[] admissible_features_cv; // predictors chosen that exceeds both conditional_info and varimp thresholds 
+    public String[] admissible_features_xval; // predictors chosen that exceeds both conditional_info and varimp thresholds 
     
     @API(help="Array of raw conditional mutual information for all features excluding sensitive attributes if " +
             "applicable", direction = API.Direction.OUTPUT)

@@ -219,7 +219,7 @@ public class InfogramModel extends Model<InfogramModel, InfogramModel.InfogramPa
 
   public static class InfogramModelOutput extends Model.Output {
     final public static int _COLUMN_INDEX=0;
-    final public static int _ADMISSIBLE_INDEX=1;
+    final public static int _ADMISSIBLE_PREDICTOR_INDEX =1;
     final public static int _RELEVANCE_INDEX=3;
     final public static int _CMI_INDEX=4;
     final public static int _CMI_RAW_INDEX=5;
@@ -227,7 +227,7 @@ public class InfogramModel extends Model<InfogramModel, InfogramModel.InfogramPa
     public double[] _admissible_cmi_raw;  // conditional info for admissible features in _admissible_features raw
     public String[] _admissible_features; // predictors chosen that exceeds both conditional_info and varimp thresholds
     public String[] _admissible_features_valid;
-    public String[] _admissible_features_cv;
+    public String[] _admissible_features_xval;
     public double[] _admissible_index;  // store distance from 1,1 corner of infogram plot
     public double[] _admissible_index_valid; // needed to build validation frame
     public double[] _admissible; // 0 if predictor is admissible and 1 otherwise
@@ -297,7 +297,7 @@ public class InfogramModel extends Model<InfogramModel, InfogramModel.InfogramPa
       List<Double> predictorCMIRaw = new ArrayList<>();
       List<String> admissiblePred = new ArrayList<>();
       for (long rowIndex=0; rowIndex<numRow; rowIndex++) {
-        if (relCMIFrame.vec(_ADMISSIBLE_INDEX).at(rowIndex) > 0) {
+        if (relCMIFrame.vec(_ADMISSIBLE_PREDICTOR_INDEX).at(rowIndex) > 0) {
           varimps.add(relCMIFrame.vec(_RELEVANCE_INDEX).at(rowIndex));
           predictorCMI.add(relCMIFrame.vec(_CMI_INDEX).at(rowIndex));
           predictorCMIRaw.add(relCMIFrame.vec(_CMI_RAW_INDEX).at(rowIndex));
@@ -307,7 +307,7 @@ public class InfogramModel extends Model<InfogramModel, InfogramModel.InfogramPa
       if (validFrame) {
         _admissible_features_valid = admissiblePred.toArray(new String[admissiblePred.size()]);
       } else if (cvFrame) {
-        _admissible_features_cv = admissiblePred.toArray(new String[admissiblePred.size()]);
+        _admissible_features_xval = admissiblePred.toArray(new String[admissiblePred.size()]);
       } else {
         _admissible_features = admissiblePred.toArray(new String[admissiblePred.size()]);
         _admissible_cmi = predictorCMI.stream().mapToDouble(i -> i).toArray();

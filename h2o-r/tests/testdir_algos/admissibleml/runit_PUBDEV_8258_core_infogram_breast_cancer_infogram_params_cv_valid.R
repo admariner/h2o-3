@@ -17,6 +17,7 @@ infogramBCVCV <- function() {
     split = h2o.splitFrame(data=bhexFV,ratios=.8)
     train = h2o.assign(split[[1]],key="train")
     test = h2o.assign(split[[2]],key="test")
+    browser()
     infogramModel <- h2o.infogram(y=Y, x=X, training_frame=train,  seed=12345, top_n_features=50) # model with training dataset
     infogramModelV <- h2o.infogram(y=Y, x=X, training_frame=train,  validation_frame=test, seed=12345, top_n_features=50) # model with training, validation datasets
     infogramModelCV <- h2o.infogram(y=Y, x=X, training_frame=train,  nfolds=2, seed=12345, top_n_features=50) # model with training, CV
@@ -37,6 +38,7 @@ infogramBCVCV <- function() {
     compareFrames(relCMIValidV, relCMIValidVCV, prob=1.0)
     
     Log.info("comparing infogram info from cross-validation hold out")
+    browser()
     relCMICVCV <- infogramModelCV@admissible_score_xval
     relCMICVVCV <- infogramModelVCV@admissible_score_xval
     compareFrames(relCMICVCV, relCMICVVCV, prob=1.0)
