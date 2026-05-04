@@ -772,8 +772,9 @@ Deep Learning Hyperparameters
 - ``balance_classes``
 - ``class_sampling_factors``
 - ``classification_stop`` 
-- ``col_major`` 
-- ``elastic_averaging`` 
+- ``col_major``
+- ``distribution``
+- ``elastic_averaging``
 - ``elastic_averaging_moving_rate`` 
 - ``elastic_averaging_regularization`` 
 - ``epochs`` 
@@ -824,6 +825,7 @@ DRF Hyperparameters
 
 - ``balance_classes``
 - ``class_sampling_factors``
+- ``distribution``
 - ``max_after_balance_size``
 - ``seed``
 
@@ -855,7 +857,6 @@ ModelSelection Hyperparameters
 - ``nparallelism``
 - ``rand_family``
 - ``seed``
-- ``startval``
 - ``tweedie_variance_power``
 
 GAM Hyperparameters
@@ -882,6 +883,7 @@ GBM Hyperparameters
 
 - ``balance_classes``
 - ``class_sampling_factors``
+- ``distribution``
 - ``max_after_balance_size``
 - ``seed``
 
@@ -930,6 +932,7 @@ XGBoost Hyperparameters
 - ``colsample_bylevel``
 - ``colsample_bynode``
 - ``colsample_bytree``
+- ``distribution``
 - ``dmatrix_type``
 - ``eta``
 - ``gamma``
@@ -1033,11 +1036,11 @@ Shared Tree Hyperparameters
 +=====================================+=====+=====+=========+===========+===========+========+
 | ``col_sample_rate``                 ||yes|| |no|| |yes|   | |no|      | |no|      | |no|   |
 +-------------------------------------+-----+-----+---------+-----------+-----------+--------+
-| ``col_sample_rate_change_per_level``||yes|||yes|| |yes|   | |yes|     | |yes|     | |yes|  |
+| ``col_sample_rate_change_per_level``||yes|||yes|| |no|    | |yes|     | |yes|     | |yes|  |
 +-------------------------------------+-----+-----+---------+-----------+-----------+--------+
 | ``col_sample_rate_per_tree``        ||yes|||yes|| |yes|   | |yes|     | |yes|     | |yes|  |
 +-------------------------------------+-----+-----+---------+-----------+-----------+--------+
-| ``histogram_type``                  ||yes|||yes|| |yes|   | |yes|     | |no|      | |yes|  |
+| ``histogram_type``                  ||yes|||yes|| |no|    | |yes|     | |no|      | |yes|  |
 +-------------------------------------+-----+-----+---------+-----------+-----------+--------+
 | ``learn_rate``                      ||yes|| |no|| |yes|   | |no|      | |no|      | |no|   |
 +-------------------------------------+-----+-----+---------+-----------+-----------+--------+
@@ -1051,17 +1054,17 @@ Shared Tree Hyperparameters
 +-------------------------------------+-----+-----+---------+-----------+-----------+--------+
 | ``mtries``                          | |no|||yes|| |no|    | |yes|     | |no|      | |yes|  |
 +-------------------------------------+-----+-----+---------+-----------+-----------+--------+
-| ``nbins``                           ||yes|||yes|| |yes|   | |yes|     | |yes|     | |yes|  |
+| ``nbins``                           ||yes|||yes|| |no|    | |yes|     | |yes|     | |yes|  |
 +-------------------------------------+-----+-----+---------+-----------+-----------+--------+
-| ``nbins_cats``                      ||yes|||yes|| |yes|   | |yes|     | |yes|     | |yes|  |
+| ``nbins_cats``                      ||yes|||yes|| |no|    | |yes|     | |yes|     | |yes|  |
 +-------------------------------------+-----+-----+---------+-----------+-----------+--------+
-| ``nbins_top_level``                 ||yes|||yes|| |yes|   | |yes|     | |yes|     | |yes|  |
+| ``nbins_top_level``                 ||yes|||yes|| |no|    | |yes|     | |yes|     | |yes|  |
 +-------------------------------------+-----+-----+---------+-----------+-----------+--------+
 | ``ntrees``                          ||yes|||yes|| |yes|   | |yes|     | |yes|     | |yes|  |
 +-------------------------------------+-----+-----+---------+-----------+-----------+--------+
 | ``sample_rate``                     ||yes|||yes|| |yes|   | |yes|     | |no|      | |yes|  |
 +-------------------------------------+-----+-----+---------+-----------+-----------+--------+
-| ``sample_rate_per_class``           ||yes|||yes|| |yes|   | |yes|     | |yes|     | |yes|  |
+| ``sample_rate_per_class``           ||yes|||yes|| |no|    | |yes|     | |yes|     | |yes|  |
 +-------------------------------------+-----+-----+---------+-----------+-----------+--------+
 | ``sample_size``                     | |no|| |no|| |no|    | |yes|     | |yes|     | |no|   |
 +-------------------------------------+-----+-----+---------+-----------+-----------+--------+
@@ -1071,6 +1074,24 @@ Shared Tree Hyperparameters
 +-------------------------------------+-----+-----+---------+-----------+-----------+--------+
 | ``pred_noise_bandwidth``            ||yes|| |no|| |no|    | |no|      | |no|      | |no|   |
 +-------------------------------------+-----+-----+---------+-----------+-----------+--------+
+
+.. _stopping-runtime-controls:
+
+Stopping and Runtime Controls
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The following parameters apply to all supervised algorithms and are marked
+``Hyperparameter: yes`` on their individual pages. They control early
+stopping and total runtime rather than model structure, so fix them once
+per grid rather than varying them across models:
+
+- ``max_runtime_secs``
+- ``stopping_metric``
+- ``stopping_rounds``
+- ``stopping_tolerance``
+
+Set these on ``search_criteria`` or on the per-model parameters to cap
+total runtime or stop individual models early.
 
 Grid Testing
 ------------
