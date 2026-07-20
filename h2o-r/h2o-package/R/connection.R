@@ -36,6 +36,7 @@
 #' @param extra_classpath (Optional) A vector of paths to libraries to be added to the Java classpath when H2O is started from R.
 #' @param jvm_custom_args (Optional) A \code{character} list of custom arguments for the JVM where new H2O instance is going to run, if started. Ignored when connecting to an existing instance.
 #' @param bind_to_localhost (Optional) A \code{logical} flag indicating whether access to the H2O instance should be restricted to the local machine (default) or if it can be reached from other computers on the network. Only applicable when H2O is started from R.
+#' @param telemetry (Optional) \code{TRUE}/\code{FALSE} explicitly enables/disables all anonymous usage telemetry for this R session (\code{FALSE} is equivalent to setting \code{DO_NOT_TRACK=1}). The default \code{NULL} leaves the current state unchanged, so an earlier \code{telemetry = FALSE} is not silently re-enabled by a later bare \code{h2o.init()}. On a fresh session the state is the package default (currently enabled). See the "Privacy & Telemetry" section of the project README for what is collected and how to opt out persistently.
 #' @return this method will load it and return a \code{H2OConnection} object containing the IP address and port number of the H2O server.
 #' @note Users may wish to manually upgrade their package (rather than waiting until being prompted), which requires
 #' that they fully uninstall and reinstall the H2O package, and the H2O client package. You must unload packages running
@@ -69,7 +70,21 @@ h2o.init <- function(ip = "localhost", port = 54321, name = NA_character_, start
                      username = NA_character_, password = NA_character_, use_spnego = FALSE,
                      cookies = NA_character_, context_path = NA_character_, ignore_config = FALSE,
                      extra_classpath = NULL, jvm_custom_args = NULL,
-                     bind_to_localhost = TRUE) {
+                     bind_to_localhost = TRUE,
+                     telemetry = NULL) {
+
+    # Programmatic telemetry opt-out — set early so even an exception during
+    # h2o.init() doesn't leak a single ping before this line runs. NULL means
+    # "leave the current state" so a later bare h2o.init() can't silently
+    # re-enable an earlier telemetry = FALSE.
+    tryCatch(if (!is.null(telemetry)) .h2o.telemetry.set_disabled(!isTRUE(telemetry)),
+             error = function(e) invisible(NULL))
+
+    # Kick off a detached, non-blocking `java -version` probe now (unless opted
+    # out) so its result is cached and ready by the time the session-start
+    # telemetry event fires at the end of init — without ever blocking init().
+    tryCatch(if (!.h2o.telemetry.disabled()) .h2o.telemetry.warm_java(),
+             error = function(e) invisible(NULL))
 
     if(!(ignore_config)){
       # Check for .h2oconfig file
@@ -290,6 +305,22 @@ h2o.init <- function(ip = "localhost", port = 54321, name = NA_character_, start
     cat("\n")
   }
   .attach.new.session(conn)
+
+  # Fire-and-forget telemetry; never blocks h2o.init(), never raises.
+  # Honors the DO_NOT_TRACK env var internally.
+  # Pick init vs cluster_connect based on whether we actually spawned a JVM.
+  tryCatch({
+    cluster_shape <- tryCatch(.h2o.telemetry.derive_cluster_shape(),
+                              error = function(e) NULL)
+    if (isTRUE(.h2o.startedH2O())) {
+      .h2o.send_init_telemetry(as.character(packageVersion("h2o")),
+                               cluster_shape = cluster_shape)
+    } else {
+      .h2o.send_cluster_connect_telemetry(as.character(packageVersion("h2o")),
+                                          cluster_shape = cluster_shape)
+    }
+  }, error = function(e) invisible(NULL))
+
   invisible(conn)
 }
 
@@ -682,6 +713,13 @@ h2o.resume <- function(recovery_dir=NULL) {
 
   if(enable_assertions) args <- c(args, "-ea")
   if(!is.null(jvm_custom_args)) args <- c(args,jvm_custom_args)
+
+  # The R client already reports this session via its own init event, so the
+  # spawned server skips its redundant cluster_started (dedup, not opt-out).
+  args <- c(args, "-Dsys.ai.h2o.telemetry.clientLaunched=true")
+  # Propagate a client-side opt-out (telemetry=FALSE or DO_NOT_TRACK) to the
+  # spawned server so it stays opted out of any server-side telemetry too.
+  if (.h2o.telemetry.disabled()) args <- c(args, "-Dsys.ai.h2o.telemetry.disabled=true")
 
   if (!is.null(extra_classpath)) {
     class_path <- paste0(c(jar_file, extra_classpath), collapse=.Platform$path.sep)

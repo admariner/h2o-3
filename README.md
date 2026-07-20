@@ -24,6 +24,7 @@ H2O-3 (this repository) is the third incarnation of H2O, and the successor to [H
 * [Building H2O on Hadoop](#BuildingHadoop)
 * [Sparkling Water](#Sparkling)
 * [Documentation](#Documentation)
+* [Privacy & Telemetry](#Privacy)
 * [Citing H2O](#Citing)
 * [Community](#Community) / [Advisors](#Advisors) / [Investors](#Investors)
 
@@ -661,8 +662,29 @@ If the build fails, try `gradlew clean`, then `git clean -f`.
 Documentation for each bleeding edge nightly build is available on the [nightly build page](http://s3.amazonaws.com/h2o-release/h2o/master/latest.html).
 
 
+<a name="Privacy"></a>
+## 9. Privacy & Telemetry
+
+H2O-3 can send anonymous usage telemetry to help us prioritize features and platforms. It is **opt-in and off by default** — nothing is sent unless you turn it on. Here is what happens when enabled:
+
+- **Purpose.** Limited operational/runtime telemetry, used only in aggregate to operate, secure, support, maintain, and improve H2O-3 — common deployment patterns, compatibility/support prioritization, and abuse detection. Never for sales prospecting, lead identification, or user surveillance.
+- **Default is off (opt-in).** Nothing is sent until you explicitly turn telemetry on; the choice is remembered across sessions.
+- **One small ping per `h2o.init()`** plus one per major user action (training, scoring, MOJO download, upload, import, save/load, AutoML). Each ping is ~200 bytes of JSON over HTTPS.
+- **Standalone & Hadoop clusters too.** A cluster started directly with `java -jar h2o.jar` or `hadoop jar h2odriver.jar` can send one ping when the cluster forms — once telemetry is turned on. Same fields.
+- **What's sent:** version strings, OS, an ephemeral session UUID regenerated on every `h2o.init()`, a Unix timestamp, the algorithm name, and coarse bucket labels for counts (rows, columns, durations, sizes) — reported as ranges, not raw integers. One exception: a small cluster's exact node count (1–16) is sent, since 1-node vs 4-node is operationally meaningful; larger clusters are bucketed.
+- **What's never sent:** code, dataset contents, prompts, model inputs or outputs, training data, prediction values, file paths or URLs, dataset/model names, column names, hyperparameter values, hostnames, usernames, email addresses, precise location, or any other customer business data.
+- **IP addresses:** inherently visible to any HTTPS request; the receiver may use them transiently for coarse geographic region and network attribution, and does not persist them. The payload itself contains no location data.
+- **Turn it on** — any of the following enables telemetry:
+  - **Programmatic, persistent:** call `h2o.set_telemetry(True)` (`h2o.set_telemetry(TRUE)` in R), and read the state with `h2o.telemetry_enabled()`. Applies immediately and is saved under `~/.h2oai` so later sessions honor it.
+  - **This session only:** pass `telemetry=True` (Python) / `telemetry = TRUE` (R) to `h2o.init()` or `h2o.connect()`.
+  - **Config file:** add `general.telemetry = true` under `[general]` in `~/.h2oconfig`.
+  - **JVM cluster:** start it with `-Dsys.ai.h2o.telemetry.disabled=false` (off unless this flag is explicitly set to false).
+- **Keep it off / turn it back off** — `DO_NOT_TRACK=1` is a hard opt-out that always wins (honored by Python, R, and the JVM server); or use `h2o.set_telemetry(False)`, `telemetry=False`, `general.telemetry = false`, or (JVM) `-Dsys.ai.h2o.telemetry.disabled=true`.
+- **Fire-and-forget.** Every call runs on a background task with a 2-second timeout. If the receiver is unreachable, your code returns exactly as if telemetry never happened — never blocks, never raises, never retries.
+
+
 <a name="Citing"></a>
-## 9. Citing H2O
+## 10. Citing H2O
 
 If you use H2O as part of your workflow in a publication, please cite your H2O resource(s) using the following BibTex entry:
 
@@ -702,7 +724,7 @@ Arora, A., Candel, A., Lanford, J., LeDell, E., and Parmar, V. (Oct. 2016). _Dee
 Click, C., Lanford, J., Malohlava, M., Parmar, V., and Roark, H. (Oct. 2016). _Gradient Boosted Models with H2O_. <http://docs.h2o.ai/h2o/latest-stable/h2o-docs/booklets/GBMBooklet.pdf>.
 
 <a name="Community"></a>
-## 10. Community
+## 11. Community
 
 H2O has been built by a great many number of contributors over the years both within H2O.ai (the company) and the greater open source community.  You can begin to contribute to H2O by answering [Stack Overflow](http://stackoverflow.com/questions/tagged/h2o) questions or [filing bug reports](https://github.com/h2oai/h2o-3/issues).  Please join us!  
 
