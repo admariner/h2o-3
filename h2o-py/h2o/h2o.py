@@ -8,6 +8,7 @@ h2o -- module for using H2O services.
 import os
 import subprocess
 import tempfile
+import time
 import warnings
 import webbrowser
 
@@ -35,6 +36,8 @@ from .utils.config import H2OConfigReader
 from .utils.metaclass import deprecated_fn
 from .utils.shared_utils import check_frame_id, gen_header, py_tmp_key, quoted
 from .utils.typechecks import assert_is_type, assert_satisfies, BoundInt, BoundNumeric, I, is_type, numeric, U
+from . import telemetry as _telemetry
+from .telemetry import send_init_telemetry as _send_init_telemetry
 
 # enable h2o deprecation warnings by default to ensure that users get notified in interactive mode, without being too annoying
 warnings.filterwarnings("once", category=H2ODeprecationWarning)
@@ -45,9 +48,23 @@ warnings.filterwarnings("once", category=H2ODependencyWarning)
 h2oconn = None  # type: H2OConnection
 
 
+def _h2o_version_safe():
+    """Return the h2o package version as a string, or "" if unavailable.
+
+    Pulled lazily so telemetry call sites don't import-cycle through the
+    top-level package during module init.
+    """
+    try:
+        from . import __version__ as _v
+        return _v
+    except Exception:
+        return ""
+
+
 def connect(server=None, url=None, ip=None, port=None,
             https=None, verify_ssl_certificates=None, cacert=None,
-            auth=None, proxy=None, cookies=None, verbose=True, config=None, strict_version_check=False):
+            auth=None, proxy=None, cookies=None, verbose=True, config=None, strict_version_check=False,
+            telemetry=None):
     """
     Connect to an existing H2O server, remote or local.
 
@@ -68,6 +85,9 @@ def connect(server=None, url=None, ip=None, port=None,
     :param verbose: Set to False to disable printing connection status messages.
     :param config: Connection configuration object encapsulating connection parameters.
     :param strict_version_check: If True, an error will be raised if the client and server versions don't match.
+    :param telemetry: ``True``/``False`` explicitly enables/disables all anonymous usage telemetry for this process
+                      (``False`` is equivalent to the ``DO_NOT_TRACK`` environment variable). The default ``None``
+                      leaves the current state unchanged, so an earlier ``telemetry=False`` is not silently re-enabled.
     :returns: the new :class:`H2OConnection` object.
 
     :examples:
@@ -82,6 +102,11 @@ def connect(server=None, url=None, ip=None, port=None,
 
     """
     global h2oconn
+    # Programmatic telemetry opt-out — set before any event can fire. None means
+    # "leave the current state" so a later bare connect() can't re-enable an
+    # earlier telemetry=False.
+    if telemetry is not None:
+        _telemetry.set_disabled(not telemetry)
     svc = _strict_version_check(strict_version_check, config=config)
     if config:
         if "connect_params" in config:
@@ -95,6 +120,15 @@ def connect(server=None, url=None, ip=None, port=None,
                                      verbose=verbose, strict_version_check=svc)
         if verbose:
             h2oconn.cluster.show_status()
+    # Fire-and-forget telemetry; never blocks, never raises. h2o.connect()
+    # by definition attaches to an existing cluster (no local JVM spawn),
+    # so we always emit `cluster_connect`. Honors the DO_NOT_TRACK env var
+    # internally.
+    try:
+        _cluster_shape = _telemetry.derive_cluster_shape(h2oconn)
+    except Exception:
+        _cluster_shape = None
+    _telemetry.send_cluster_connect_telemetry(_h2o_version_safe(), cluster_shape=_cluster_shape)
     return h2oconn
 
 
@@ -136,8 +170,9 @@ def connection():
 
 def init(url=None, ip=None, port=None, name=None, https=None, cacert=None, insecure=None, username=None, password=None,
          cookies=None, proxy=None, start_h2o=True, nthreads=-1, ice_root=None, log_dir=None, log_level=None,
-         max_log_file_size=None, enable_assertions=True, max_mem_size=None, min_mem_size=None, strict_version_check=None, 
-         ignore_config=False, extra_classpath=None, jvm_custom_args=None, bind_to_localhost=True, verbose = True, **kwargs):
+         max_log_file_size=None, enable_assertions=True, max_mem_size=None, min_mem_size=None, strict_version_check=None,
+         ignore_config=False, extra_classpath=None, jvm_custom_args=None, bind_to_localhost=True, verbose = True,
+         telemetry=None, **kwargs):
     """
     Attempt to connect to a local server, or if not successful start a new server and connect to it.
 
@@ -181,6 +216,11 @@ def init(url=None, ip=None, port=None, name=None, https=None, cacert=None, insec
     :param jvm_custom_args: Customer, user-defined argument's for the JVM H2O is instantiated in. Ignored if there is an instance of H2O already running and the client connects to it.
     :param bind_to_localhost: A flag indicating whether access to the H2O instance should be restricted to the local machine (default) or if it can be reached from other computers on the network.
     :param verbose: Set to False to disable printing connection status and info messages.
+    :param telemetry: ``True``/``False`` explicitly enables/disables all anonymous usage telemetry for this process;
+        ``False`` is equivalent to setting the ``DO_NOT_TRACK=1`` environment variable. The default ``None`` leaves the
+        current state unchanged, so an earlier ``telemetry=False`` is not silently re-enabled by a later bare
+        ``h2o.init()``. On a fresh process the state is the package default (currently enabled). See the
+        "Privacy & Telemetry" section of the project README for what is collected and how to opt out persistently.
 
 
     :examples:
@@ -190,6 +230,12 @@ def init(url=None, ip=None, port=None, name=None, https=None, cacert=None, insec
 
     """
     global h2oconn
+    # Programmatic telemetry opt-out — set early so even an exception during
+    # init() doesn't leak a single ping before this line runs. None means "leave
+    # the current state", so a later bare init() can't silently re-enable an
+    # earlier telemetry=False.
+    if telemetry is not None:
+        _telemetry.set_disabled(not telemetry)
     assert_is_type(url, str, None)
     assert_is_type(ip, str, None)
     assert_is_type(port, int, str, None)
@@ -266,6 +312,7 @@ def init(url=None, ip=None, port=None, name=None, https=None, cacert=None, insec
 
     if not start_h2o:
         print("Warning: if you don't want to start local H2O server, then use of `h2o.connect()` is preferred.")
+    _spawned_local_server = False
     try:
         h2oconn = H2OConnection.open(url=url, ip=ip, port=port, name=name, https=https,
                                      verify_ssl_certificates=verify_ssl_certificates, cacert=cacert,
@@ -292,9 +339,41 @@ def init(url=None, ip=None, port=None, name=None, https=None, cacert=None, insec
         h2oconn = H2OConnection.open(server=hs, https=https, verify_ssl_certificates=verify_ssl_certificates,
                                      cacert=cacert, auth=auth, proxy=proxy, cookies=cookies, verbose=verbose,
                                      strict_version_check=svc)
+        _spawned_local_server = True
     h2oconn.cluster.timezone = "UTC"
     if verbose:
         h2oconn.cluster.show_status()
+    # Fire-and-forget telemetry; never blocks, never raises. Honors the
+    # DO_NOT_TRACK env var internally.
+    # Pick the event type based on whether we actually spawned a local JVM:
+    # init for fresh-cluster path, cluster_connect for attach-to-existing path.
+    try:
+        _cluster_shape = _telemetry.derive_cluster_shape(h2oconn)
+    except Exception:
+        _cluster_shape = None
+    if _spawned_local_server:
+        _send_init_telemetry(_h2o_version_safe(), cluster_shape=_cluster_shape)
+    else:
+        _telemetry.send_cluster_connect_telemetry(_h2o_version_safe(), cluster_shape=_cluster_shape)
+
+
+def set_telemetry(enabled):
+    """Enable or disable anonymous client telemetry and persist the choice.
+
+    Applies immediately and is remembered across sessions (stored under
+    ``~/.h2oai``). The ``DO_NOT_TRACK`` environment variable still overrides it.
+    Best-effort and silent: never raises, never prints.
+
+    :param enabled: ``True`` to enable telemetry, ``False`` to opt out.
+    :returns: ``True`` if the preference was saved to disk, else ``False``.
+    """
+    return _telemetry.set_telemetry(enabled)
+
+
+def telemetry_enabled():
+    """Return ``True`` if anonymous client telemetry is currently enabled."""
+    return _telemetry.telemetry_enabled()
+
 
 def resume(recovery_dir=None):
     """
@@ -408,8 +487,33 @@ def upload_file(path, destination_frame=None, header=0, sep=None, col_names=None
     check_frame_id(destination_frame)
     if path.startswith("~"):
         path = os.path.expanduser(path)
-    return H2OFrame()._upload_parse(path, destination_frame, header, sep, col_names, col_types, na_strings, skipped_columns,
-                                    force_col_types, quotechar, escapechar)
+    outcome = "ok"
+    _result_frame = None
+    _t0 = time.time()
+    try:
+        _result_frame = H2OFrame()._upload_parse(path, destination_frame, header, sep, col_names, col_types, na_strings, skipped_columns,
+                                                 force_col_types, quotechar, escapechar)
+        return _result_frame
+    except BaseException:
+        outcome = "error"
+        raise
+    finally:
+        # Fire-and-forget telemetry; never raises. size is best-effort.
+        try:
+            size = os.path.getsize(path) if os.path.exists(path) else 0
+            _fmt = _telemetry.derive_file_format(path)
+            shape = _telemetry.derive_frame_shape(_result_frame) if outcome == "ok" else None
+            _telemetry.send_upload(_h2o_version_safe(), _fmt, size, outcome, frame_shape=shape)
+            # frame_parsed captures the parse operation itself. Only fire on a
+            # completed parse where rows/cols are known — both are REQUIRED.
+            if outcome == "ok":
+                _dims = _telemetry.derive_frame_dims(_result_frame)
+                if _dims is not None:
+                    _telemetry.send_frame_parsed(_h2o_version_safe(), _fmt, outcome,
+                                                 int((time.time() - _t0) * 1000),
+                                                 _dims[0], _dims[1], frame_memory_gb=_dims[2])
+        except Exception:
+            pass
 
 
 def import_file(path=None, destination_frame=None, parse=True, header=0, sep=None, col_names=None, col_types=None,
@@ -497,11 +601,50 @@ def import_file(path=None, destination_frame=None, parse=True, header=0, sep=Non
     if any(os.path.split(p)[0] == "~" for p in patharr):
         raise H2OValueError("Paths relative to a current user (~) are not valid in the server environment. "
                             "Please use absolute paths if possible.")
-    if not parse:
-        return lazy_import(path, pattern)
-    else:
-        return H2OFrame()._import_parse(path, pattern, destination_frame, header, sep, col_names, col_types, na_strings,
-                                        skipped_columns, force_col_types, custom_non_data_line_markers, partition_by, quotechar, escapechar, tz_adjust_to_local)
+    outcome = "ok"
+    _result_frame = None
+    _t0 = time.time()
+    try:
+        if not parse:
+            _result_frame = lazy_import(path, pattern)
+            return _result_frame
+        else:
+            _result_frame = H2OFrame()._import_parse(path, pattern, destination_frame, header, sep, col_names, col_types, na_strings,
+                                                    skipped_columns, force_col_types, custom_non_data_line_markers, partition_by, quotechar, escapechar, tz_adjust_to_local)
+            return _result_frame
+    except BaseException:
+        outcome = "error"
+        raise
+    finally:
+        try:
+            # Use the first path when a list is supplied; only the URL scheme leaks out.
+            first = path[0] if isinstance(path, list) and path else path
+            # For local paths, we can derive the on-disk size. For remote paths
+            # (s3/hdfs/gcs/http), we don't probe — leave data_size_bucket null.
+            size = None
+            if first and os.path.exists(first):
+                try:
+                    size = os.path.getsize(first)
+                except Exception:
+                    size = None
+            _fmt = _telemetry.derive_file_format(first)
+            shape = _telemetry.derive_frame_shape(_result_frame) if (outcome == "ok" and parse) else None
+            _telemetry.send_import(_h2o_version_safe(),
+                                   _telemetry.derive_source_scheme(first),
+                                   _fmt,
+                                   outcome,
+                                   compressed_size_bytes=size,
+                                   frame_shape=shape)
+            # frame_parsed only when an actual parse ran and produced a frame
+            # with known rows/cols (both REQUIRED on that event).
+            if outcome == "ok" and parse:
+                _dims = _telemetry.derive_frame_dims(_result_frame)
+                if _dims is not None:
+                    _telemetry.send_frame_parsed(_h2o_version_safe(), _fmt, outcome,
+                                                 int((time.time() - _t0) * 1000),
+                                                 _dims[0], _dims[1], frame_memory_gb=_dims[2])
+        except Exception:
+            pass
 
 
 def load_grid(grid_file_path, load_params_references=False):
@@ -1424,18 +1567,40 @@ def download_pojo(model, path="", get_jar=True, jar_name=""):
         raise H2OValueError("Export to POJO not supported")
 
     path = str(os.path.join(path, ''))
-    if path == "":
-        java_code = api("GET /3/Models.java/%s" % model.model_id)
-        print(java_code)
-        return None
-    else:
-        filename = api("GET /3/Models.java/%s" % model.model_id, save_to=path)
-        if get_jar:
-            if jar_name == "":
-                api("GET /3/h2o-genmodel.jar", save_to=os.path.join(path, "h2o-genmodel.jar"))
-            else:
-                api("GET /3/h2o-genmodel.jar", save_to=os.path.join(path, jar_name))
-        return filename
+    outcome = "ok"
+    _pojo_file = None
+    try:
+        if path == "":
+            java_code = api("GET /3/Models.java/%s" % model.model_id)
+            print(java_code)
+            return None
+        else:
+            filename = api("GET /3/Models.java/%s" % model.model_id, save_to=path)
+            _pojo_file = filename
+            if get_jar:
+                if jar_name == "":
+                    api("GET /3/h2o-genmodel.jar", save_to=os.path.join(path, "h2o-genmodel.jar"))
+                else:
+                    api("GET /3/h2o-genmodel.jar", save_to=os.path.join(path, jar_name))
+            return filename
+    except BaseException:
+        outcome = "error"
+        raise
+    finally:
+        # Fire-and-forget model_download telemetry (format=pojo); never raises.
+        try:
+            _algo = (model._model_json or {}).get("algo", "") if getattr(model, "_model_json", None) else ""
+            size = None
+            if _pojo_file and os.path.exists(_pojo_file):
+                try:
+                    size = os.path.getsize(_pojo_file)
+                except Exception:
+                    size = None
+            _telemetry.send_model_download(_h2o_version_safe(), algo=_algo, family=None,
+                                           outcome=outcome, fmt="pojo",
+                                           compressed_size_bytes=size)
+        except Exception:
+            pass
 
 
 def download_csv(data, filename):
@@ -1526,7 +1691,28 @@ def save_model(model, path="", force=False, export_cross_validation_predictions=
         assert_is_type(filename, str)
     path = os.path.join(os.getcwd() if path == "" else path, filename)
     data = {"dir": path, "force": force, "export_cross_validation_predictions": export_cross_validation_predictions}
-    return api("GET /99/Models.bin/%s" % model.model_id, data=data)["dir"]
+    outcome = "ok"
+    saved_path = None
+    try:
+        saved_path = api("GET /99/Models.bin/%s" % model.model_id, data=data)["dir"]
+        return saved_path
+    except BaseException:
+        outcome = "error"
+        raise
+    finally:
+        try:
+            algo = (model._model_json or {}).get("algo", "") if hasattr(model, "_model_json") else ""
+            size = None
+            if saved_path and os.path.exists(saved_path):
+                try:
+                    size = os.path.getsize(saved_path)
+                except Exception:
+                    size = None
+            _telemetry.send_model_save(_h2o_version_safe(), algo=algo, family=None,
+                                       outcome=outcome, fmt="binary",
+                                       compressed_size_bytes=size)
+        except Exception:
+            pass
 
 
 def download_model(model, path="", export_cross_validation_predictions=False, filename=None):
@@ -1560,9 +1746,31 @@ def download_model(model, path="", export_cross_validation_predictions=False, fi
     else:
         assert_is_type(filename, str)
     path = os.path.join(os.getcwd() if path == "" else path, filename)
-    return api("GET /3/Models.fetch.bin/%s" % model.model_id,
-               data={"export_cross_validation_predictions": export_cross_validation_predictions}, 
-               save_to=path)
+    outcome = "ok"
+    _saved = None
+    try:
+        _saved = api("GET /3/Models.fetch.bin/%s" % model.model_id,
+                     data={"export_cross_validation_predictions": export_cross_validation_predictions},
+                     save_to=path)
+        return _saved
+    except BaseException:
+        outcome = "error"
+        raise
+    finally:
+        # Fire-and-forget model_download telemetry (format=binary); never raises.
+        try:
+            _algo = (model._model_json or {}).get("algo", "") if getattr(model, "_model_json", None) else ""
+            size = None
+            if _saved and os.path.exists(_saved):
+                try:
+                    size = os.path.getsize(_saved)
+                except Exception:
+                    size = None
+            _telemetry.send_model_download(_h2o_version_safe(), algo=_algo, family=None,
+                                           outcome=outcome, fmt="binary",
+                                           compressed_size_bytes=size)
+        except Exception:
+            pass
 
 
 def upload_model(path):
@@ -1604,8 +1812,31 @@ def load_model(path):
     >>> h2o.load_model(model)
     """
     assert_is_type(path, str)
-    res = api("POST /99/Models.bin/%s" % "", data={"dir": path})
-    return get_model(res["models"][0]["model_id"]["name"])
+    outcome = "ok"
+    loaded_model = None
+    try:
+        res = api("POST /99/Models.bin/%s" % "", data={"dir": path})
+        loaded_model = get_model(res["models"][0]["model_id"]["name"])
+        return loaded_model
+    except BaseException:
+        outcome = "error"
+        raise
+    finally:
+        try:
+            algo = ""
+            if loaded_model is not None and hasattr(loaded_model, "_model_json"):
+                algo = (loaded_model._model_json or {}).get("algo", "")
+            size = None
+            if path and os.path.exists(path):
+                try:
+                    size = os.path.getsize(path)
+                except Exception:
+                    size = None
+            _telemetry.send_model_load(_h2o_version_safe(), algo=algo, family=None,
+                                       outcome=outcome, fmt="binary",
+                                       compressed_size_bytes=size)
+        except Exception:
+            pass
 
 
 def export_file(frame, path, force=False, sep=",", compression=None, parts=1, header=True, quote_header=True, 
